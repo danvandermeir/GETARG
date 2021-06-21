@@ -1,7 +1,7 @@
 #!/bin/bash
 GETARGS() {
 	#present function call with getopts like interface
-	local FLGVARNAME ARGVARNAME SHUFARG SHUFARG2
+	local FLGVARNAME ARGVARNAME CURARG
 	FLGVARNAME="FLG$$"
 	ARGVARNAME="ARG$$"
 	if [ -n "${!FLGVARNAME}" ]; then
@@ -9,157 +9,270 @@ GETARGS() {
 		eval "${!ARGVARNAME}"
 	fi
 	if declare -p FLG&>/dev/null; then
-
-		if [ "${#FLG[@]}" -ne 0 ]; then
-			for SHUFARG in "${!FLG[@]}"; do
-				if [ $SHUFARG -eq 0 ]; then
+		if [ "${#FLG[@]}" -eq 0 ]; then
+			unset $FLGVARNAME $ARGVARNAME $2 OPTARG
+			return 1
+		else
+			for CURARG in "${!FLG[@]}"; do
+				if [ $CURARG -eq 0 ]; then
 					eval export "$2"="${FLG[0]}"
 				else
-					FLG[$((SHUFARG - 1))]="${FLG[SHUFARG]}"
+					FLG[$((CURARG - 1))]="${FLG[$CURARG]}"
 				fi
-				unset FLG[$SHUFARG]
+				unset FLG[$CURARG]
 			done
 			if [ ${#ARG[@]} -eq 0 ]; then
 				unset OPTARG
 			else
-				for SHUFARG in "${!ARG[@]}"; do
-					if [ $SHUFARG -eq 0 ]; then
-						if [ -n "${ARG[0]}" ]; then
-							export OPTARG="${ARG[0]}"
-						else
-							unset OPTARG
-						fi
+				[ -z "${ARG[0]}" ] && unset OPTARG
+				for CURARG in "${!ARG[@]}"; do
+					if [ $CURARG -eq 0 ]; then
+						[ -n "${ARG[0]}" ] && export OPTARG="${ARG[0]}"
 					else
-						ARG[$((SHUFARG - 1))]="${ARG[SHUFARG]}"
+						ARG[$((CURARG - 1))]="${ARG[$CURARG]}"
 					fi
-					unset ARG[$SHUFARG]
+					unset ARG[$CURARG]
 				done
 			fi
-			SHUFARG='$(declare -p FLG)'
-			eval $FLGVARNAME="$SHUFARG"
-			SHUFARG='$(declare -p ARG)'
-			eval $ARGVARNAME="$SHUFARG"
+			CURARG='$(declare -p FLG)'
+			eval $FLGVARNAME="$CURARG"
+			CURARG='$(declare -p ARG)'
+			eval $ARGVARNAME="$CURARG"
 			return 0
+		fi
+	fi
+	local ALLFLGS SHRTFLGS TMPSHRTFLGS TMPLNGFLGS CURFLG TMP1 TMP2 REQARG NOREQARG ERRHNDL
+	#input sanitize, build lists of accepted flags, then build array based on presented arguements and accepted flags
+	ALLFLGS="$1"
+	while [[ "$ALLFLGS" == *'::'* ]]; do
+		ALLFLGS="${ALLFLGS/::/:}"
+	done
+	while [[ "$ALLFLGS" == *',,'* ]]; do
+		ALLFLGS="${ALLFLGS/,,/,}"
+	done
+	while [[ "$ALLFLGS" == *'---'* ]]; do
+		ALLFLGS="${ALLFLGS/---/--}"
+	done
+	SHRTFLGS="${ALLFLGS%%--*}"
+	TMPLNGFLGS="--${ALLFLGS#*--}"
+	if [ "${SHRTFLGS::1}" = ':' ]; then
+		SHRTFLGS="${SHRTFLGS:1}"
+		ERRHNDL=true
+	else
+		ERRHNDL=false
+	fi
+	CURFLG=0
+	REQARG=''
+	TMPSHRTFLGS="$SHRTFLGS"
+	NOREQARG=''
+	for CURARG in "${@:3}"; do
+		if [ "$CURARG" = '-' ] || [ "$CURARG" = '--' ]; then
+			if $ERRHNDL; then
+				local FLG[$CURFLG] ARG[$CURFLG]
+				FLG[$CURFLG]='?'
+				ARG[$CURFLG]="$CURARG"
+				CURFLG=$((CURFLG + 1))
+				continue 1
+			else
+				printf -- "$CURARG is invalid!\n" >&2
+				return 1
+			fi
+		fi
+		if [[ "$CURARG" == '-'* ]]; then
+			if [ -n "$REQARG" ]; then
+				if $ERRHNDL; then
+					while [ -n "$REQARG" ]; do
+						TMP1="${REQARG%%,*}"
+						local ARG[$TMP1]
+						ARG[$TMP1]="${FLG[$TMP1]}"
+						FLG[$TMP1]='?'
+						REQARG="${REQARG#$TMP1,}"
+					done
+				else
+					printf -- "${ARG[$CURFLG]} no supplied arrguement!\n" >&2
+					return 1
+				fi
+			fi
+			if [[ "$CURARG" == '--'* ]]; then
+				if [[ "$ALLFLGS" != *"$CURARG"* ]]; then
+					if $ERRHNDL; then
+						local FLG[$CURFLG] ARG[$CURFLG]
+						FLG[$CURFLG]="?"
+						ARG[$CURFLG]="$CURARG"
+						CURFLG=$((CURFLG + 1))
+						continue 1
+					else
+						printf -- "$CURARG is invalid flag!\n" >&2
+						return 1
+					fi
+				fi
+				if [[ "$TMPLNGFLGS" = *"$CURARG"* ]]; then
+					TMP2="$TMPLNGFLGS"
+					while [ -n "$TMP2" ]; do
+						if [[ "$TMP2" = "$CURARG"* ]]; then
+							local FLG[$CURFLG]
+							FLG[$CURFLG]="$CURARG"
+							TMP2="${TMP2#$CURARG}"
+							if [ "${TMP2::1}" = ':' ]; then
+								[ "${TMP2:1:1}" != ',' ] && TMPLNGFLGS="${TMPLNGFLGS/$CURARG:}"
+								REQARG="$REQARG$CURFLG,"
+							elif [ "${TMP2::1}" = ',' ]; then
+								if [ "${TMP2:1:1}" = ':' ]; then
+									REQARG="$REQARG$CURFLG,"
+								else
+									NOREQARG="$NOREQARG$CURFLG,"
+								fi
+							else
+								TMPLNGFLGS="${TMPLNGFLGS/$CURARG:}"
+								NOREQARG="$NOREQARG$CURFLG,"
+							fi
+							CURFLG=$((CURFLG + 1))
+							break 1
+						else
+							TMP2="${TMP2:2}"
+							TMP2="--${TMP2#*--}"
+						fi
+					done
+				elif $ERRHNDL; then
+					local FLG[$CURFLG] ARG[$CURFLG]
+					FLG[$CURFLG]="?"
+					ARG[$CURFLG]="$CURARG"
+					CURFLG=$((CURFLG + 1))
+					continue 1
+				else
+					printf -- "$CURARG cannot be used again!\n" >&2
+					return 1
+				fi
+			else
+				CURARG="${CURARG:1}"
+				while [ -n "$CURARG" ]; do
+					TMP1="${CURARG::1}"
+					CURARG="${CURARG:1}"
+					if [[ "$SHRTFLGS" != *"$TMP1"* ]]; then
+						if $ERRHNDL; then
+							local FLG[$CURFLG] ARG[$CURFLG]
+							FLG[$CURFLG]="?"
+							ARG[$CURFLG]="-$TMP1"
+							CURFLG=$((CURFLG + 1))
+							continue 1
+						else
+							printf -- "-$TMP1 is invalid flag!\n" >&2
+							return 1
+						fi
+					fi
+					if [[ "$TMPSHRTFLGS" = *"$TMP1"* ]]; then
+						TMP2="$TMPSHRTFLGS"
+						while [ -n "$TMP2" ]; do
+							if [[ "$TMP2" = "$TMP1"* ]]; then
+								local FLG[$CURFLG]
+								FLG[$CURFLG]="$TMP1"
+								TMP2="${TMP2:1}"
+								TMP1="${TMP2::1}"
+								if [ "$TMP1" = ':' ]; then
+									[ "${TMP2:1:1}" != ',' ] && TMPSHRTFLGS="${TMPSHRTFLGS/${FLG[$CURFLG]}:}"
+									REQARG="$REQARG$CURFLG,"
+								elif [ "$TMP1" = ',' ]; then
+									if [ "${TMP2:1:1}" = ':' ]; then
+										REQARG="$REQARG$CURFLG,"
+									else
+										NOREQARG="$NOREQARG$CURFLG,"
+									fi
+								else
+									TMPSHRTFLGS="${TMPSHRTFLGS/${FLG[$CURFLG]}}"
+									NOREQARG="$NOREQARG$CURFLG,"
+								fi
+								FLG[$CURFLG]="-${FLG[$CURFLG]}"
+								CURFLG=$((CURFLG + 1))
+								break 1
+							else
+								TMP2="${TMP2:1}"
+							fi
+						done
+					elif $ERRHNDL; then
+						local FLG[$CURFLG] ARG[$CURFLG]
+						FLG[$CURFLG]="?"
+						ARG[$CURFLG]="-$TMP1"
+						NOREQARG="$NOREQARG$CURFLG,"
+						CURFLG=$((CURFLG + 1))
+						continue 1
+					else
+						printf -- "-$TMP1 cannot be used again!\n" >&2
+						return 1
+					fi
+				done
+			fi
+		elif [ -n "$REQARG" ]; then
+			TMP1="${REQARG%%,*}"
+			local ARG[$TMP1]
+			ARG[$TMP1]="$CURARG"
+			REQARG="${REQARG#$TMP1,}"
+			NOREQARG="$NOREQARG$TMP1,"
+		elif [ -z "${FLG[0]}" ]; then
+			if $ERRHNDL; then
+				local FLG[$CURFLG] ARG[$CURFLG]
+				FLG[$CURFLG]="?"
+				ARG[$CURFLG]="$CURARG"
+				CURFLG=$((CURFLG + 1))
+			else
+				printf -- "$CURARG is not a flag!\n" >&2
+				return 1
+			fi
+		elif [ -z "$REQARG" ]; then
+			if $ERRHNDL; then
+				local FLG[$CURFLG] ARG[$CURFLG]
+				FLG[$CURFLG]='?'
+				if [[ "$NOREQARG" = *"$((CURFLG - 1))"* ]]; then
+					ARG[$CURFLG]="$CURARG"
+					NOREQARG="$NOREQARG$CURFLG,"
+				elif [ "${FLG[$((CURFLG - 1))]}" = '?' ]; then
+					ARG[$CURFLG]="${ARG[$((CURFLG - 1))]}"
+				else
+					ARG[$CURFLG]="${FLG[$((CURFLG - 1))]}"
+				fi
+				CURFLG=$((CURFLG + 1))
+			else
+				printf -- "${FLG[$((CURFLG - 1))]} over supplied arrguements!\n" >&2
+				return 1
+			fi
+		fi
+	done
+	if [ -n "$REQARG" ]; then
+		if $ERRHNDL; then
+			local ARG[$CURFLG]
+			ARG[$CURFLG]="${FLG[$CURFLG]}"
+			FLG[$CURFLG]='?'
 		else
-			unset $FLGVARNAME $ARGVARNAME $2 OPTARG
+			printf -- "${ARG[$CURFLG]} no supplied arrguement!\n" >&2
 			return 1
 		fi
 	fi
-	local CURARG ALLARGS SHUFARG3 SHUFARG4
-	#minor input sanitize and build list of presented flags
-	ALLARGS=''
-	while [[ "$1" == *'::'* ]]; do
-		set -- "${1/::/:}" "${@:2}"
-	done
-	CURARG="${@:3}"
-	[[ "$CURARG" == '-' ]] || [[ "$CURARG" != '-'* ]] && return 1
-	for CURARG in "${@:3}"; do
-		[[ "$CURARG" == '-' ]] && return 1
-		[[ "$CURARG" == '-'* ]] && ALLARGS="$ALLARGS${CURARG#-}"
-	done
-	[ -z "$ALLARGS" ] && return 1
-	CURARG="$ALLARGS"
-	#error for unknown presented flags
-	while [[ -n "$CURARG" ]]; do
-		SHUFARG="${CURARG::1}"
-		[[ "$1" != *"$SHUFARG"* ]] && return 1
-		CURARG="${CURARG:1}"
-	done
-	#creates presented flags to iterate over allowing multiple iterance of flag if postpended , in flag options
-	while [ -n "$ALLARGS" ]; do
-		SHUFARG="${ALLARGS::1}"
-		CURARG="$CURARG$SHUFARG"
-		SHUFARG2="${1#*$SHUFARG}"
-		SHUFARG3="${SHUFARG2::1}"
-		SHUFARG4=''
-		while [ "$SHUFARG3" = ',' ] || [ "$SHUFARG3" = ':' ]; do
-			[ "$SHUFARG3" = ',' ] && ALLARGS="${ALLARGS:1}" && SHUFARG4=','
-			[ "$SHUFARG3" = ':' ] && CURARG="$CURARG$SHUFARG3"
-			SHUFARG2="${SHUFARG2:1}"
-			SHUFARG3="${SHUFARG2::1}"
-		done
-		[ -z "$SHUFARG4" ] && ALLARGS="${ALLARGS//$SHUFARG}"
-	done
-	#create arrays of flags and respective arguements, error if required arguement not present
-	SHUFARG2=0
-	SHUFARG3=false
-	SHUFARG4=false
-	for SHUFARG in "${@:3}"; do
-		if [[ "$SHUFARG" == "-"* ]]; then
-			$SHUFARG3 && return 1
-			ALLARGS="${SHUFARG#-}"
-		fi
-		while [ -n "$ALLARGS" ]; do
-			SHUFARG3=true
-			if $SHUFARG4 || [ "${ALLARGS::1}" = "${CURARG::1}" ]; then
-				local FLG[$SHUFARG2]
-				FLG[$SHUFARG2]="${ALLARGS::1}"
-				CURARG="${CURARG:1}"
-				if [ "${CURARG::1}" = ':' ]; then
-					SHUFARG4=true
-					break 1
-				elif $SHUFARG4; then
-					SHUFARG4=false
-					local ARG[$SHUFARG2]
-					ARG[$SHUFARG2]="$SHUFARG"
-				fi
-				SHUFARG2=$((SHUFARG2 + 1))
-			elif [ "${1::1}" = ':' ]; then
-				eval export "$2"='?'
-				export OPTARG="${FLG[$SHUFARG2]}"
-			else
-				printf "FAILURE\n" &>2
-				exit  1
-			fi
-			ALLARGS="${ALLARGS:1}"
-			SHUFARG3=false
-		done
-	done
-	$SHUFARG3 || $SHUFARG4 && return 1
 	#first output to function call location
-	for SHUFARG in "${!FLG[@]}"; do
-		if [ $SHUFARG -eq 0 ]; then
-			eval export "$2"="${FLG[0]}"
-		else
-			FLG[$((SHUFARG - 1))]="${FLG[SHUFARG]}"
-		fi
-		unset FLG[$SHUFARG]
-	done
-	if [ ${#ARG[@]} -ne 0 ]; then
-		for SHUFARG in "${!ARG[@]}"; do
-			if [ $SHUFARG -eq 0 ]; then
-				if [ -n "${ARG[0]}" ]; then
-					export OPTARG="${ARG[0]}"
-				else
-					unset OPTARG
-				fi
+	if [ -n "${FLG[0]}" ]; then
+		for REQARG in "${!FLG[@]}"; do
+			if [ $REQARG -eq 0 ]; then
+				eval export "$2"="${FLG[0]}"
 			else
-				ARG[$((SHUFARG - 1))]="${ARG[SHUFARG]}"
+				FLG[$((REQARG - 1))]="${FLG[$REQARG]}"
 			fi
-			unset ARG[$SHUFARG]
+			unset FLG[$REQARG]
 		done
+		if [ ${#ARG[@]} -ne 0 ]; then
+			[ -z "${ARG[0]}" ] && unset OPTARG
+			for REQARG in "${!ARG[@]}"; do
+				if [ $REQARG -eq 0 ]; then
+					[ -n "${ARG[0]}" ] && export OPTARG="${ARG[0]}"
+				else
+					ARG[$((REQARG - 1))]="${ARG[$REQARG]}"
+				fi
+				unset ARG[$REQARG]
+			done
+		fi
+		REQARG='$(declare -p FLG)'
+		eval export $FLGVARNAME="$REQARG"
+		REQARG='$(declare -p ARG)'
+		eval export $ARGVARNAME="$REQARG"
+		return 0
+	else
+		return 1
 	fi
-	SHUFARG='$(declare -p FLG)'
-	eval export $FLGVARNAME="$SHUFARG"
-	SHUFARG='$(declare -p ARG)'
-	eval export $ARGVARNAME="$SHUFARG"
-	return 0
 }
-
-while GETARGS a::b,c:, x "$@"; do
-	case $x in
-		a) echo 'a called with '"$OPTARG";;
-		b) echo 'b called'"$OPTARG";;
-		c) echo 'c called with '"$OPTARG";;
-	esac
-done
-
-#pPeoiInsfca
-#:p:P:le:o:i:I:n:s:f:c:ugda:
-
-	# $1 must be allowed flag list as described
-	# $2 must be chosen variable name
-	# $3 must be "$@" or arguements
-	# : prepended to flag list will not exit on error, errors must be handled similar to getopts
-	# , postpended to flag means flag can be passed multiple times
-	# : postpended to flag means flag has required arguement
