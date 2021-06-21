@@ -41,7 +41,7 @@ GETARGS() {
 			return 0
 		fi
 	fi
-	local ALLFLGS SHRTFLGS TMPSHRTFLGS TMPLNGFLGS CURFLG TMP1 TMP2 REQARG NOREQARG ERRHNDL
+	local ALLFLGS SHRTFLGS TMPSHRTFLGS TMPLNGFLGS CURFLG TMP1 TMP2 REQARGS NOREQARGS ERRHNDL
 	#input sanitize, build lists of accepted flags, then build array based on presented arguements and accepted flags
 	ALLFLGS="$1"
 	while [[ "$ALLFLGS" == *'::'* ]]; do
@@ -53,8 +53,10 @@ GETARGS() {
 	while [[ "$ALLFLGS" == *'---'* ]]; do
 		ALLFLGS="${ALLFLGS/---/--}"
 	done
-	SHRTFLGS="${ALLFLGS%%--*}"
 	TMPLNGFLGS="--${ALLFLGS#*--}"
+	SHRTFLGS="${ALLFLGS%%--*}"
+	SHRTFLGS="${SHRTFLGS//-/}"
+	TMPSHRTFLGS="$SHRTFLGS"
 	if [ "${SHRTFLGS::1}" = ':' ]; then
 		SHRTFLGS="${SHRTFLGS:1}"
 		ERRHNDL=true
@@ -62,9 +64,8 @@ GETARGS() {
 		ERRHNDL=false
 	fi
 	CURFLG=0
-	REQARG=''
-	TMPSHRTFLGS="$SHRTFLGS"
-	NOREQARG=''
+	REQARGS=''
+	NOREQARGS=''
 	for CURARG in "${@:3}"; do
 		if [ "$CURARG" = '-' ] || [ "$CURARG" = '--' ]; then
 			if $ERRHNDL; then
@@ -79,20 +80,21 @@ GETARGS() {
 			fi
 		fi
 		if [[ "$CURARG" == '-'* ]]; then
-			if [ -n "$REQARG" ]; then
-				if $ERRHNDL; then
-					while [ -n "$REQARG" ]; do
-						TMP1="${REQARG%%,*}"
-						local ARG[$TMP1]
-						ARG[$TMP1]="${FLG[$TMP1]}"
-						FLG[$TMP1]='?'
-						REQARG="${REQARG#$TMP1,}"
-					done
-				else
-					printf -- "${ARG[$CURFLG]} no supplied arrguement!\n" >&2
-					return 1
+				if [ -n "$REQARGS" ]; then
+					if $ERRHNDL; then
+						while [ -n "$REQARGS" ]; do
+							TMP1="${REQARGS%%,*}"
+							local ARG[$TMP1]
+							ARG[$TMP1]="${FLG[$TMP1]}"
+							FLG[$TMP1]='?'
+							REQARGS="${REQARGS#$TMP1,}"
+						done
+					else
+						TMP1="${REQARGS%%,*}"
+						printf -- "${FLG[$TMP1]} no supplied arguement!\n" >&2
+						return 1
+					fi
 				fi
-			fi
 			if [[ "$CURARG" == '--'* ]]; then
 				if [[ "$ALLFLGS" != *"$CURARG"* ]]; then
 					if $ERRHNDL; then
@@ -115,16 +117,16 @@ GETARGS() {
 							TMP2="${TMP2#$CURARG}"
 							if [ "${TMP2::1}" = ':' ]; then
 								[ "${TMP2:1:1}" != ',' ] && TMPLNGFLGS="${TMPLNGFLGS/$CURARG:}"
-								REQARG="$REQARG$CURFLG,"
+								REQARGS="$REQARGS$CURFLG,"
 							elif [ "${TMP2::1}" = ',' ]; then
 								if [ "${TMP2:1:1}" = ':' ]; then
-									REQARG="$REQARG$CURFLG,"
+									REQARGS="$REQARGS$CURFLG,"
 								else
-									NOREQARG="$NOREQARG$CURFLG,"
+									NOREQARGS="$NOREQARGS$CURFLG,"
 								fi
 							else
 								TMPLNGFLGS="${TMPLNGFLGS/$CURARG:}"
-								NOREQARG="$NOREQARG$CURFLG,"
+								NOREQARGS="$NOREQARGS$CURFLG,"
 							fi
 							CURFLG=$((CURFLG + 1))
 							break 1
@@ -170,16 +172,16 @@ GETARGS() {
 								TMP1="${TMP2::1}"
 								if [ "$TMP1" = ':' ]; then
 									[ "${TMP2:1:1}" != ',' ] && TMPSHRTFLGS="${TMPSHRTFLGS/${FLG[$CURFLG]}:}"
-									REQARG="$REQARG$CURFLG,"
+									REQARGS="$REQARGS$CURFLG,"
 								elif [ "$TMP1" = ',' ]; then
 									if [ "${TMP2:1:1}" = ':' ]; then
-										REQARG="$REQARG$CURFLG,"
+										REQARGS="$REQARGS$CURFLG,"
 									else
-										NOREQARG="$NOREQARG$CURFLG,"
+										NOREQARGS="$NOREQARGS$CURFLG,"
 									fi
 								else
 									TMPSHRTFLGS="${TMPSHRTFLGS/${FLG[$CURFLG]}}"
-									NOREQARG="$NOREQARG$CURFLG,"
+									NOREQARGS="$NOREQARGS$CURFLG,"
 								fi
 								FLG[$CURFLG]="-${FLG[$CURFLG]}"
 								CURFLG=$((CURFLG + 1))
@@ -192,7 +194,7 @@ GETARGS() {
 						local FLG[$CURFLG] ARG[$CURFLG]
 						FLG[$CURFLG]="?"
 						ARG[$CURFLG]="-$TMP1"
-						NOREQARG="$NOREQARG$CURFLG,"
+						NOREQARGS="$NOREQARGS$CURFLG,"
 						CURFLG=$((CURFLG + 1))
 						continue 1
 					else
@@ -201,12 +203,12 @@ GETARGS() {
 					fi
 				done
 			fi
-		elif [ -n "$REQARG" ]; then
-			TMP1="${REQARG%%,*}"
+		elif [ -n "$REQARGS" ]; then
+			TMP1="${REQARGS%%,*}"
 			local ARG[$TMP1]
 			ARG[$TMP1]="$CURARG"
-			REQARG="${REQARG#$TMP1,}"
-			NOREQARG="$NOREQARG$TMP1,"
+			REQARGS="${REQARGS#$TMP1,}"
+			NOREQARGS="$NOREQARGS$TMP1,"
 		elif [ -z "${FLG[0]}" ]; then
 			if $ERRHNDL; then
 				local FLG[$CURFLG] ARG[$CURFLG]
@@ -217,13 +219,13 @@ GETARGS() {
 				printf -- "$CURARG is not a flag!\n" >&2
 				return 1
 			fi
-		elif [ -z "$REQARG" ]; then
+		elif [ -z "$REQARGS" ]; then
 			if $ERRHNDL; then
 				local FLG[$CURFLG] ARG[$CURFLG]
 				FLG[$CURFLG]='?'
-				if [[ "$NOREQARG" = *"$((CURFLG - 1))"* ]]; then
+				if [[ "$NOREQARGS" = *"$((CURFLG - 1))"* ]]; then
 					ARG[$CURFLG]="$CURARG"
-					NOREQARG="$NOREQARG$CURFLG,"
+					NOREQARGS="$NOREQARGS$CURFLG,"
 				elif [ "${FLG[$((CURFLG - 1))]}" = '?' ]; then
 					ARG[$CURFLG]="${ARG[$((CURFLG - 1))]}"
 				else
@@ -236,41 +238,46 @@ GETARGS() {
 			fi
 		fi
 	done
-	if [ -n "$REQARG" ]; then
+	if [ -n "$REQARGS" ]; then
 		if $ERRHNDL; then
-			local ARG[$CURFLG]
-			ARG[$CURFLG]="${FLG[$CURFLG]}"
-			FLG[$CURFLG]='?'
+			while [ -n "$REQARGS" ]; do
+				TMP1="${REQARGS%%,*}"
+				local ARG[$TMP1]
+				ARG[$TMP1]="${FLG[$TMP1]}"
+				FLG[$TMP1]='?'
+				REQARGS="${REQARGS#$TMP1,}"
+			done
 		else
-			printf -- "${ARG[$CURFLG]} no supplied arrguement!\n" >&2
+			TMP1="${REQARGS%%,*}"
+			printf -- "${FLG[$TMP1]} no supplied arguement!\n" >&2
 			return 1
 		fi
 	fi
 	#first output to function call location
 	if [ -n "${FLG[0]}" ]; then
-		for REQARG in "${!FLG[@]}"; do
-			if [ $REQARG -eq 0 ]; then
+		for REQARGS in "${!FLG[@]}"; do
+			if [ $REQARGS -eq 0 ]; then
 				eval export "$2"="${FLG[0]}"
 			else
-				FLG[$((REQARG - 1))]="${FLG[$REQARG]}"
+				FLG[$((REQARGS - 1))]="${FLG[$REQARGS]}"
 			fi
-			unset FLG[$REQARG]
+			unset FLG[$REQARGS]
 		done
 		if [ ${#ARG[@]} -ne 0 ]; then
 			[ -z "${ARG[0]}" ] && unset OPTARG
-			for REQARG in "${!ARG[@]}"; do
-				if [ $REQARG -eq 0 ]; then
+			for REQARGS in "${!ARG[@]}"; do
+				if [ $REQARGS -eq 0 ]; then
 					[ -n "${ARG[0]}" ] && export OPTARG="${ARG[0]}"
 				else
-					ARG[$((REQARG - 1))]="${ARG[$REQARG]}"
+					ARG[$((REQARGS - 1))]="${ARG[$REQARGS]}"
 				fi
-				unset ARG[$REQARG]
+				unset ARG[$REQARGS]
 			done
 		fi
-		REQARG='$(declare -p FLG)'
-		eval export $FLGVARNAME="$REQARG"
-		REQARG='$(declare -p ARG)'
-		eval export $ARGVARNAME="$REQARG"
+		REQARGS='$(declare -p FLG)'
+		eval export $FLGVARNAME="$REQARGS"
+		REQARGS='$(declare -p ARG)'
+		eval export $ARGVARNAME="$REQARGS"
 		return 0
 	else
 		return 1
